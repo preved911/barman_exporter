@@ -75,5 +75,5 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	log.Println("exporter started")
-	http.ListenAndServe(":8090", nil)
+	http.ListenAndServe(":9706", nil)
 }
