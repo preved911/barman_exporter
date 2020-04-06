@@ -3,6 +3,11 @@ language: go
 go:
 - 1.13.x
 
+script:
+  - go get -v .
+  - mkdir release
+  - go build -o release/barman_exporter-${TRAVIS_TAG}-linux-amd64
+
 deploy:
   provider: releases
   skip_cleanup: true
