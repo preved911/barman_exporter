@@ -50,7 +50,11 @@ func barmanCheck() {
 				barmanExecPath,
 				"list-server", "--minimal")
 
-			out, _ := cmd.CombinedOutput()
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				log.Printf("given databases list failed: %s\n", err)
+			}
+
 			dbs := strings.Split(string(out), "\n")
 			dbs = dbs[:len(dbs)-1]
 
