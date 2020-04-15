@@ -52,7 +52,7 @@ func barmanCheck() {
 
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				log.Printf("given databases list failed: %s\n", err)
+				log.Printf("giving databases list failed: %s\n", err)
 			}
 
 			dbs := strings.Split(string(out), "\n")
