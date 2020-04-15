@@ -42,10 +42,18 @@ func barmanCheck() {
 		barmanUserName = "barman"
 	}
 
-	dbs := strings.Split(os.Getenv("BARMAN_CHECK_DATABASES"), ",")
-
 	go func() {
 		for {
+			cmd := exec.Command(
+				sudoExecPath,
+				fmt.Sprintf("--user=%s", barmanUserName),
+				barmanExecPath,
+				"list-server", "--minimal")
+
+			out, _ := cmd.CombinedOutput()
+			dbs := strings.Split(string(out), "\n")
+			dbs = dbs[:len(dbs)-1]
+
 			for _, db := range dbs {
 				cmd := exec.Command(
 					sudoExecPath,
@@ -55,12 +63,13 @@ func barmanCheck() {
 
 				err := cmd.Run()
 				if err != nil {
-					log.Printf("check failed: %s", err)
+					log.Printf("check failed: %s\n", err)
 					barmanCheckExitCode.WithLabelValues(db).Set(1)
 				} else {
 					barmanCheckExitCode.WithLabelValues(db).Set(0)
 				}
 			}
+
 			time.Sleep(30 * time.Second)
 		}
 	}()
