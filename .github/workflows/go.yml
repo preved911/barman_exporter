@@ -31,7 +31,7 @@ jobs:
 
     - name: Build
       env:
-        GITHUB_TAG: steps.tag_info.outputs.GITHUB_TAG
+        GITHUB_TAG: ${{ steps.tag_info.outputs.GITHUB_TAG }}
       run: |
         mkdir release
         go build -v \
@@ -53,9 +53,9 @@ jobs:
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TAG: ${{ steps.tag_info.outputs.GITHUB_TAG }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: ./release/*
-        # asset_name: 
-        # asset_content_type: application/zip
+        asset_name: barman_exporter-${GITHUB_TAG}-linux-amd64
         asset_content_type: application/octet-stream
