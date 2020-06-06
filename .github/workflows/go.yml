@@ -45,7 +45,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        release_name: barman_exporter ${{ github.ref }}
         draft: false
         prerelease: false
 
@@ -56,6 +56,6 @@ jobs:
         GITHUB_TAG: ${{ steps.tag_info.outputs.GITHUB_TAG }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./release/*
+        asset_path: ./release/barman_exporter-${GITHUB_TAG}-linux-amd64
         asset_name: barman_exporter-${GITHUB_TAG}-linux-amd64
         asset_content_type: application/octet-stream
