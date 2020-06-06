@@ -53,9 +53,8 @@ jobs:
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITHUB_TAG: ${{ steps.tag_info.outputs.GITHUB_TAG }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./release/barman_exporter-${GITHUB_TAG}-linux-amd64
-        asset_name: barman_exporter-${GITHUB_TAG}-linux-amd64
+        asset_path: ./release/barman_exporter-${{ steps.tag_info.outputs.GITHUB_TAG }}-linux-amd64
+        asset_name: barman_exporter-${{ steps.tag_info.outputs.GITHUB_TAG }}-linux-amd64
         asset_content_type: application/octet-stream
