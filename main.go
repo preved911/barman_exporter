@@ -8,7 +8,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
+
+	"github.com/spf13/pflag"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -16,8 +19,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const (
+	flagUsageMessage = `Supported env variables:
+	SUDO_BINARY_PATH   - path to sudo binary (default: /usr/bin/sudo)
+	BARMAN_BINARY_PATH - path to barman binary path (default: /usr/bin/barman)
+	BARMAN_USER_NAME   - username, which used for barman execution (default: barman)
+	BARMAN_CONFIG_DIR  - path to dir with user defined config files (default: /etc/barman.d)
+
+Allowed flags:`
+)
+
 var (
-	barmanCheckExitCode = prometheus.NewGaugeVec(
+	sudoExecPath, barmanExecPath, barmanUserName, barmanConfigDir string
+
+	mux sync.Mutex
+
+	version       string
+	commitID      string
+	checkExitCode *prometheus.GaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "barman_check_exit_code",
 			Help: "barman check command exit code result.",
@@ -25,49 +44,49 @@ var (
 		[]string{"backup"},
 	)
 
-	sudoExecPath, barmanExecPath, barmanUserName, barmanConfigDir string
-
-	mux sync.Mutex
+	flagSet            *pflag.FlagSet = pflag.NewFlagSet("barman_exporter", pflag.ExitOnError)
+	flagVersion        bool
+	flagScrapeInterval int
 )
 
 // periodic task for metrics values update
-func barmanCheck() {
-	go func() {
-		for {
-			mux.Lock()
+func periodicCheck() {
+	for {
+		// mux.Lock()
 
-			barmanUpdateMetrics()
+		barmanUpdateMetrics(0)
 
-			mux.Unlock()
+		// mux.Unlock()
 
-			time.Sleep(30 * time.Second)
-		}
-	}()
+		time.Sleep(time.Duration(flagScrapeInterval) * time.Second)
+	}
 }
 
-func barmanReset(event fsnotify.Event) {
+func resetMetrics(event fsnotify.Event) {
 	log.Println(event.Op)
 
 	if event.Op <= 4 {
-		log.Println("reset metrics started")
+		timestamp := time.Now().Unix()
+
+		log.Printf("[%d] reset metrics started", timestamp)
 
 		mux.Lock()
 
 		// reset metrics if files changed
-		barmanCheckExitCode.Reset()
-
-		// and then update metrics
-		barmanUpdateMetrics()
+		checkExitCode.Reset()
 
 		mux.Unlock()
 
-		log.Println("reset metrics completed")
+		// and then update metrics
+		barmanUpdateMetrics(timestamp)
+
+		log.Printf("[%d] reset metrics completed", timestamp)
 	}
 }
 
 // check config directory changes
 // and reset metrics if files removed or added
-func barmanConfigDirectoryCheck() {
+func configDirectoryCheck() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
@@ -83,7 +102,7 @@ func barmanConfigDirectoryCheck() {
 					return
 				}
 				log.Println("fsnotify event:", event)
-				barmanReset(event)
+				resetMetrics(event)
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -101,10 +120,41 @@ func barmanConfigDirectoryCheck() {
 	<-done
 }
 
+// write new metrics values
+func writeMetircValue(timestamp int64, db string) {
+	log.Printf("[%d] get metric for db: %s", timestamp, db)
+
+	cmd := exec.Command(
+		sudoExecPath,
+		fmt.Sprintf("--user=%s", barmanUserName),
+		barmanExecPath,
+		"check", db)
+
+	err := cmd.Run()
+
+	log.Printf("[%d] got metric for db: %s", timestamp, db)
+
+	mux.Lock()
+
+	if err != nil {
+		log.Printf("[%d] check failed: %s\n", timestamp, err)
+		checkExitCode.WithLabelValues(db).Set(1)
+	} else {
+		checkExitCode.WithLabelValues(db).Set(0)
+	}
+
+	mux.Unlock()
+}
+
 // create metrics or override them's values
-func barmanUpdateMetrics() {
+func barmanUpdateMetrics(timestamp int64) {
+	if timestamp == 0 {
+		timestamp = time.Now().Unix()
+	}
+
 	log.Printf(
-		"execute: %s --user=%s %s list-server --minimal\n",
+		"[%d] execute: %s --user=%s %s list-server --minimal\n",
+		timestamp,
 		sudoExecPath,
 		barmanUserName,
 		barmanExecPath,
@@ -118,32 +168,19 @@ func barmanUpdateMetrics() {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("giving databases list failed: %s\n", err)
+		log.Printf("[%d] giving databases list failed: %s\n", timestamp, err)
 	}
 
 	dbs := strings.Split(string(out), "\n")
 	dbs = dbs[:len(dbs)-1]
 
-	log.Printf("prepared backups list: %v\n", dbs)
+	log.Printf("[%d] prepared backups list: %v\n", timestamp, dbs)
 
 	for _, db := range dbs {
-		cmd := exec.Command(
-			sudoExecPath,
-			fmt.Sprintf("--user=%s", barmanUserName),
-			barmanExecPath,
-			"check", db)
-
-		err := cmd.Run()
-
-		if err != nil {
-			log.Printf("check failed: %s\n", err)
-			barmanCheckExitCode.WithLabelValues(db).Set(1)
-		} else {
-			barmanCheckExitCode.WithLabelValues(db).Set(0)
-		}
+		go writeMetircValue(timestamp, db)
 	}
 
-	log.Printf("check completed")
+	log.Printf("[%d] check completed", timestamp)
 }
 
 // initialize
@@ -166,14 +203,39 @@ func init() {
 		barmanUserName = "barman"
 	}
 
-	barmanConfigDir = "/etc/barman.d"
+	// override /etc/barman.d
+	barmanConfigDir = os.Getenv("BARMAN_CONFIG_DIR")
+	if barmanConfigDir == "" {
+		barmanConfigDir = "/etc/barman.d"
+	}
 
-	prometheus.MustRegister(barmanCheckExitCode)
+	prometheus.MustRegister(checkExitCode)
+}
+
+// func flagUsage(f *pflag.FlagSet) {
+func flagUsage() {
+	fmt.Println(flagUsageMessage)
+	flagSet.PrintDefaults()
 }
 
 func main() {
-	go barmanConfigDirectoryCheck()
-	barmanCheck()
+	flagSet.Usage = flagUsage
+	flagSet.BoolVar(&flagVersion, "version", false, "show current version")
+	flagSet.IntVar(&flagScrapeInterval, "scrape-interval", 300, "exporter metrics update interval")
+	flagSet.Parse(os.Args[1:])
+
+	if flagVersion {
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		if version != "" {
+			fmt.Fprintf(w, "version:\t%s\n", version)
+		}
+		fmt.Fprintf(w, "git commit:\t%s\n", commitID)
+		w.Flush()
+		os.Exit(0)
+	}
+
+	go configDirectoryCheck()
+	go periodicCheck()
 
 	http.Handle("/metrics", promhttp.Handler())
 	log.Println("exporter started")
