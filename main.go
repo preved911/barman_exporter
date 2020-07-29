@@ -46,6 +46,7 @@ var (
 
 	flagSet            *pflag.FlagSet = pflag.NewFlagSet("barman_exporter", pflag.ExitOnError)
 	flagVersion        bool
+	flagParallelCheck  bool
 	flagScrapeInterval int
 )
 
@@ -177,7 +178,11 @@ func barmanUpdateMetrics(timestamp int64) {
 	log.Printf("[%d] prepared backups list: %v\n", timestamp, dbs)
 
 	for _, db := range dbs {
-		go writeMetircValue(timestamp, db)
+		if flagParallelCheck {
+			go writeMetircValue(timestamp, db)
+		} else {
+			writeMetircValue(timestamp, db)
+		}
 	}
 
 	log.Printf("[%d] check completed", timestamp)
@@ -221,7 +226,8 @@ func flagUsage() {
 func main() {
 	flagSet.Usage = flagUsage
 	flagSet.BoolVar(&flagVersion, "version", false, "show current version")
-	flagSet.IntVar(&flagScrapeInterval, "scrape-interval", 300, "exporter metrics update interval")
+	flagSet.BoolVar(&flagParallelCheck, "parallel-check", false, "check different databases in parallel")
+	flagSet.IntVar(&flagScrapeInterval, "scrape-interval", 60, "exporter metrics update interval")
 	flagSet.Parse(os.Args[1:])
 
 	if flagVersion {
